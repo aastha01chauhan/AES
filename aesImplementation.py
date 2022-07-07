@@ -82,13 +82,57 @@ def mix_column(column):
     ]
     return r
 
+def expand_key(key, rounds):
+
+    rcon = [[1, 0, 0, 0]]
+
+    for _ in range(1, rounds):
+        rcon.append([F.Multiply(rcon[-1][0], 2), 0, 0, 0])
+
+    key_grid = arrayToGrid(key)[0]
+
+    for round in range(rounds):
+        last_column = [row[-1] for row in key_grid]
+        last_column_rotate_step = rotateRowLeft(last_column)
+        last_column_sbox_step = [lookupTable(b) for b in last_column_rotate_step]
+        last_column_rcon_step = [last_column_sbox_step[i]
+                                 ^ rcon[round][i] for i in range(len(last_column_rotate_step))]
+
+        for r in range(4):
+            key_grid[r] += bytes([last_column_rcon_step[r]
+                                  ^ key_grid[r][round*4]])
+
+        # Three more columns to go
+        for i in range(len(key_grid)):
+            for j in range(1, 4):
+                key_grid[i] += bytes([key_grid[i][round*4+j]
+                                      ^ key_grid[i][round*4+j+3]])
+
+    return key_grid
+
+def extract_key_for_round(expanded_key, round):
+    return [row[round*4: round*4 + 4] for row in expanded_key]
+
+def add_sub_key(block_grid, key_grid):
+    r = []
+
+    # 4 rows in the grid
+    for i in range(4):
+        r.append([])
+        # 4 values on each row
+        for j in range(4):
+            r[-1].append(block_grid[i][j] ^ key_grid[i][j])
+    return r
+
 def enc(key, data):
     #applying padding
-    padding = padding(data)
+    data = padding(data)
     
     #changing to grids
     grids = arrayToGrid(data)
-
+    expanded_key = expand_key(key, 11)
+    temp_grids = []
+    round_key = extract_key_for_round(expanded_key, 0)
     for round in range(1, 10):
         temp_grids = []
         
@@ -104,7 +148,30 @@ def enc(key, data):
         grids = temp_grids
 
     # A final round without the mix columns
+    temp_grids = []
+    round_key = extract_key_for_round(expanded_key, 10)
 
+    for grid in grids:
+        sub_bytes_step = subBytes(grid)
+        shift_rows_step = [rotateRowLeft(
+            sub_bytes_step[i], i) for i in range(4)]
+        add_sub_key_step = add_sub_key(shift_rows_step, round_key)
+        temp_grids.append(add_sub_key_step)
+
+    grids = temp_grids
+
+    int_stream = []
+    
+    for grid in grids:
+        for column in range(4):
+            for row in range(4):
+                int_stream.append(grid[row][column])
+
+    return int_stream
+
+x = enc('10001011011110111', '898a842ba51ee2af')
+for i in x:
+  print(hex(i)[2:], sep="", end="")
     
             
 
